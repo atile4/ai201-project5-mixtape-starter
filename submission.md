@@ -276,3 +276,7 @@ if song.shared_by != added_by_user_id:
 #### Fix
 
 To fix the issue, I added a similar condition to the `rate_song()` function that would create a notification if `song.shared_by != user_id`. To confirm the fix, I ran the reproduction script from before, and it correctly created a notification when a song was rated.
+
+## Milestone 4
+<img width="955" height="139" alt="image" src="https://github.com/user-attachments/assets/79470373-6c7d-4dc2-8e39-fc90618dc9c5" />
+
