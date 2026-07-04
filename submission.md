@@ -117,3 +117,57 @@ Returns all playlists a given user created, as a list of dicts. No existence che
 
 **`get_song(song_id)`**
 Straightforward lookup by primary key — raises `ValueError` if the song doesn't exist, otherwise returns `song.to_dict()`.
+
+### Searching Song Data Flow
+
+- Note: error
+
+1. songs.py — `GET /search` handler `search()`:
+
+- Reads the query string from the URL: `query = request.args.get("q", "")` (the q param).
+- Guard: if empty, returns `400 {"error": "Query parameter 'q' is required"}` early.
+- Calls `search_songs(query)`.
+
+2. search_service.py — `search_songs(query)`:
+
+- Builds one SQLAlchemy query on `Song`, `outerjoining` the `song_tags` association table (search_service.py:27).
+- Filters with a case-insensitive `OR: Song.title ILIKE %query%` **OR** `Song.artist ILIKE %query%` (search_service.py:28-33).
+- `.all()` executes it, returning `Song` ORM objects.
+- Maps each through `song.to_dict()` → returns `list[dict]`.
+
+3. models.py — `Song.to_dict()`: serializes each song's fields plus a `tags` list built from `[tag.name for tag in self.tags]` (tags loaded via the `lazy="subquery"` relationship at models.py:90).
+
+4. Back in songs.py — wraps the list: `jsonify({"results": results, "count": len(results)})` → HTTP 200 JSON response.
+
+Some other notes: **The `outerjoin` on `song_tags` can produce duplicate rows.** A song with N tags matches the join N times, and there's no `.distinct()`, so a multi-tagged song will appear multiple times in results (and inflate count).
+
+Patterns Noticed:
+
+## Milestone 2
+
+### Issue 1: My listening streak keeps resetting
+
+#### How to reproduce:
+
+In a Flask shell, I set a user's `last_listened_at` to `Saturday Nov 8, 2025` and `listening_streak` to 5. I called `update_listening_streak(user, now)` with `now = Sunday Nov 9, 2025`, a 1-day gap. The streak reset to 1 instead of incrementing to 6. As a control, I repeated the same test with a 1-day gap landing on a non-Sunday (Sunday Nov 9 → Monday Nov 10): the streak correctly incremented to 6. This confirmed the bug only occurs when today.weekday() evaluates to 6 (Sunday).
+
+#### How you found root cause
+
+To find the root cause, I looked through `streak_service.py`, read through the doc strings for condition guidelines, and checked through the if else statements to see if they matched up. In particular, since the issue was a streak reset, I looked to see if there was anything resetting the streak, where I found this:
+
+```
+    elif days_since_last == 1 and today.weekday() != 6:
+        user.listening_streak += 1
+    else:
+        user.listening_streak = 1
+```
+
+I was confident this was the cause because there was nothing else resetting the streak, and the streak itself doesn't care about the day of the week as specified by the docstring.
+
+#### Fix
+
+To fix, we remove the condition checking for day of the week. The reset condition would run if Python's weekday() function was not equal to 6 (Sunday). Removing this will fix the weekly resets that the user experienced and stop resetting weekly.
+
+To confirm the fix, I reran my original reproduction case (Saturday→Sunday, 1-day gap, streak of 5): the streak now correctly increments to 6 instead of resetting to 1. I also reran the control case (Sunday→Monday, 1-day gap): the streak still correctly increments to 6, confirming the fix didn't change behavior for the already-working path.
+
+For side effects, I checked the two other branches in the same function to make sure they were unaffected: a same-day listen (days_since_last == 0) still correctly leaves the streak unchanged, and a multi-day gap (days_since_last >= 2) still correctly resets the streak to 1. I also searched streak_service.py and routes/users.py for any other weekday()/isoweekday() references to confirm this was an isolated leftover condition and not tied to some other intentional feature (e.g., a weekly summary or reset job), and found none.
