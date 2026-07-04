@@ -213,3 +213,66 @@ The main issue here was that `get_playlist_songs()` was returning all the elemen
 ### Fix
 
 Instead of `[:-1]`, I added a second colon `[::-1]` so that it would return the list in reverse order. I checked again by printing the length of the list after processing, and checked the songs before and after side by side, all of which turned out to work.
+
+### Issue 4: I got notified when a friend added my song to a playlist but not when they rated it
+
+#### How I reproduced:
+
+Confirmed by comparing two interactions on the same song by the same non-sharer user. Calling rate_song(user_id=<other_user>, song_id=<song>, score=5) left the sharer's notification count unchanged (0 → 0). Calling add_to_playlist(...) on the same song immediately after produced a new notification (0 → 1). This isolates the bug to rate_song specifically, since the notification pattern clearly works elsewhere in the same file.
+
+```
+from services.notification_service import rate_song, add_to_playlist, get_notifications
+from models import Song
+
+OTHER_USER_ID = "65ab5382-70a0-4714-9662-ae951d0b47f9"
+PLAYLIST_ID = "53229429-b7f9-42cb-802c-b43589893463"
+
+# 1. Find a song NOT shared by OTHER_USER_ID
+song = Song.query.filter(Song.shared_by != OTHER_USER_ID).first()
+print("song:", song.title, "shared_by:", song.shared_by)
+
+sharer_id = song.shared_by
+
+# --- Test the RATING path (the reported bug) ---
+before = get_notifications(sharer_id)
+print("notifications before rating:", len(before))
+
+rate_song(user_id=OTHER_USER_ID, song_id=song.id, score=5)
+
+after = get_notifications(sharer_id)
+print("notifications after rating:", len(after))
+# should now be before + 1, once your fix is in place
+
+# --- Test the PLAYLIST-ADD path (for comparison) ---
+before2 = get_notifications(sharer_id)
+print("notifications before add_to_playlist:", len(before2))
+
+add_to_playlist(playlist_id=PLAYLIST_ID, song_id=song.id, added_by_user_id=OTHER_USER_ID)
+
+after2 = get_notifications(sharer_id)
+print("notifications after add_to_playlist:", len(after2))
+```
+
+#### How I found Root Cause
+
+Since the bug dealt with notifications, I looked through `notification_service.py`, specifically the functions `add_to_playlist()` and `rate_song`. Those two functions dealt with adding songs to playlists and rating songs, and since the bug was notifications working for playlists but not for rating songs, I looked through where notifications were created. I knew this was the right place because for `add_to_playlist()` there was a condition to send a notification, while for `rate_song()`, there wasn't.
+
+#### Root Cause
+
+The issue was that for `rate_song()` function, there wasn't a `create_notification()` being called. Essentially, adding to playlist triggered a notification, but that trigger was missing when a song was rated.
+
+This conditional was missing from `rate_song()`
+
+```
+# Notify the person who originally shared the song (if it wasn't them who added it)
+if song.shared_by != added_by_user_id:
+    create_notification(
+        user_id=song.shared_by,
+        notification_type="song_added_to_playlist",
+        body=f"{adder.username} added your song '{song.title}' to the playlist '{playlist.name}'.",
+    )
+```
+
+#### Fix
+
+To fix the issue, I added a similar condition to the `rate_song()` function that would create a notification if `song.shared_by != user_id`. To confirm the fix, I ran the reproduction script from before, and it correctly created a notification when a song was rated.
