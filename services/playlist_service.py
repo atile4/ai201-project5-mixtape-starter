@@ -53,7 +53,6 @@ def get_playlist_songs(playlist_id: str) -> list[dict]:
     playlist = db.session.get(Playlist, playlist_id)
     if not playlist:
         raise ValueError(f"Playlist {playlist_id} not found")
-
     # Query the songs ordered by their position in the playlist
     songs = (
         db.session.query(Song)
@@ -62,8 +61,8 @@ def get_playlist_songs(playlist_id: str) -> list[dict]:
         .order_by(asc(playlist_entries.c.position))
         .all()
     )
-
-    return [song.to_dict() for song in songs[:-1]]
+    
+    return [song.to_dict() for song in songs[::-1]]
 
 
 def get_playlist(playlist_id: str) -> dict:

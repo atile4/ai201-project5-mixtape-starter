@@ -171,3 +171,45 @@ To fix, we remove the condition checking for day of the week. The reset conditio
 To confirm the fix, I reran my original reproduction case (Saturday→Sunday, 1-day gap, streak of 5): the streak now correctly increments to 6 instead of resetting to 1. I also reran the control case (Sunday→Monday, 1-day gap): the streak still correctly increments to 6, confirming the fix didn't change behavior for the already-working path.
 
 For side effects, I checked the two other branches in the same function to make sure they were unaffected: a same-day listen (days_since_last == 0) still correctly leaves the streak unchanged, and a multi-day gap (days_since_last >= 2) still correctly resets the streak to 1. I also searched streak_service.py and routes/users.py for any other weekday()/isoweekday() references to confirm this was an isolated leftover condition and not tied to some other intentional feature (e.g., a weekly summary or reset job), and found none.
+
+### Issue 3: I got notified when a friend added my song to a playlist but not when they rated it
+
+#### How to reproduce:
+
+In a flask shell, I ran this code to retrieve the id's of playlists.
+
+```
+from models import Playlist
+
+playlists = Playlist.query.all()
+for u in playlists:
+    print(u.id, u.name)
+```
+
+After that, run `curl "http://127.0.0.1:5000/playlists/<playlist_id>/songs"` and look at the number of songs. I looked at the first two playlists: Late Night and Friday Energy - both of which were seeded with 7 songs, but the command returned 6.
+
+### How I found Root Cause
+
+I first looked at `playlist_service.py`, to look at the function `get_playlist_songs`. Here, it correctly contained the number of songs, 7.
+
+```
+from services.playlist_service import get_playlist_songs
+songs = get_playlist_songs("53229429-b7f9-42cb-802c-b43589893463")
+```
+
+It looked like the service itself had no issue running. I then looked at where the function was called:
+
+```
+from routes.playlists import get_songs
+songs = get_songs("53229429-b7f9-42cb-802c-b43589893463")
+```
+
+However, here the resulting `songs` variable still had seven elements. I added print statements on the `songs` to check its length, after its creation and after its resulting process, Eventually, I found this: `return [song.to_dict() for song in songs[:-1]]`. It was returning all the elements except for the last one.
+
+### Root Cause
+
+The main issue here was that `get_playlist_songs()` was returning all the elements of songs except for the last, which is why 1 was missing. This was caused here, `return [song.to_dict() for song in songs[:-1]]`, where the `[:-1]` was cutting off the very last element.
+
+### Fix
+
+Instead of `[:-1]`, I added a second colon `[::-1]` so that it would return the list in reverse order. I checked again by printing the length of the list after processing, and checked the songs before and after side by side, all of which turned out to work.
