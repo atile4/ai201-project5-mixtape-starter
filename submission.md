@@ -278,5 +278,13 @@ if song.shared_by != added_by_user_id:
 To fix the issue, I added a similar condition to the `rate_song()` function that would create a notification if `song.shared_by != user_id`. To confirm the fix, I ran the reproduction script from before, and it correctly created a notification when a song was rated.
 
 ## Milestone 4
+
 <img width="955" height="139" alt="image" src="https://github.com/user-attachments/assets/79470373-6c7d-4dc2-8e39-fc90618dc9c5" />
 
+### AI Usage
+
+I used AI tools to help me quickly summarize functions from the services files, and to help me generate curl commands to directly test the API.
+
+In particular, I used AI to help me trace through the streak bug, as its flow was more complicated than the other issues I worked on, where Claude took me through the `update_listening_streak()` in `streak_service.py`, which helped me pinpoint its bug significantly faster.
+
+During this trace through the streak flow, AI provided me with a potential fix - removing the weekly streak reset. I had to verify through the docstring that this was a valid fix for the issue.
